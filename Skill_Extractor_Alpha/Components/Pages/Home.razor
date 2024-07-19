@@ -1,0 +1,135 @@
+﻿@page "/"
+@using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.AspNetCore.Mvc
+@using System.Text
+@using Skill_Extractor_Alpha.Models
+@using UglyToad.PdfPig
+@using System.Text.Json
+
+@inject HttpClient Http
+@inject NavigationManager Navigation
+@inject IHttpClientFactory HttpClientFactory
+@inject IJSRuntime JS
+
+@code {
+    private IBrowserFile selectedFile;
+    private bool isSubmitDisabled = true;
+    private List<KeyExtractorResultModel> results = new List<KeyExtractorResultModel>();
+
+
+    private void HandleFileSelected(InputFileChangeEventArgs e)
+    {
+        selectedFile = e.File;
+        isSubmitDisabled = false;
+    }
+
+    private async Task SubmitFile()
+    {
+        try
+        {
+            if (selectedFile != null)
+            {
+                var fileContent = await GetFileContent(selectedFile);
+
+                if (!string.IsNullOrEmpty(fileContent))
+                {
+                    var jsonResponse = await JS.InvokeAsync<string>("callHuggingFaceAPI", fileContent);
+                    results = JsonSerializer.Deserialize<List<KeyExtractorResultModel>>(jsonResponse);
+                }
+                else
+                {
+                    await JS.InvokeVoidAsync("alert", "Unsupported file format or file processing failed");
+                }
+
+                isSubmitDisabled = true;
+            }
+        }
+        catch (Exception ex)
+        {
+            await JS.InvokeVoidAsync("alert", $"An error occurred: {ex.Message}");
+        }
+    }
+
+    private async Task<string> GetFileContent(IBrowserFile file)
+    {
+        try
+        {
+            var extension = Path.GetExtension(file.Name).ToLowerInvariant();
+            string textContent = string.Empty;
+
+            // Copy the file stream into a MemoryStream
+            using (var memoryStream = new MemoryStream())
+            {
+                await file.OpenReadStream(file.Size).CopyToAsync(memoryStream);
+                memoryStream.Position = 0;
+
+                if (extension == ".pdf")
+                {
+                    using (var pdfDocument = UglyToad.PdfPig.PdfDocument.Open(memoryStream))
+                    {
+                        var sb = new StringBuilder();
+                        foreach (var page in pdfDocument.GetPages())
+                        {
+                            sb.Append(page.Text);
+                        }
+                        textContent = sb.ToString();
+                    }
+                }
+                else if (extension == ".docx" || extension == ".doc")
+                {
+                    // Add code to handle Word file processing here
+                    // Example with OpenXml SDK (you'll need to install the DocumentFormat.OpenXml package)
+                    // using (var wordDocument = WordprocessingDocument.Open(memoryStream, false))
+                    // {
+                    //     var body = wordDocument.MainDocumentPart.Document.Body;
+                    //     textContent = body.InnerText;
+                    // }
+                }
+            }
+
+            return textContent;
+        }
+        catch (Exception ex)
+        {
+            
+            throw;
+        }        
+    }
+}
+
+
+<PageTitle>Home</PageTitle>
+
+<h1>Skills Extractor 0.01</h1>
+
+<p>Welcome to skills extractor, please submit a file.</p>
+
+<InputFile OnChange="HandleFileSelected" />
+<button @onclick="SubmitFile" disabled="@isSubmitDisabled">Submit</button>
+
+@if (results != null && results.Any())
+{
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Entity Group</th>
+                <th>Score</th>
+                <th>Word</th>
+                <th>Start</th>
+                <th>End</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var result in results)
+            {
+                <tr>
+                    <td>@result.EntityGroup</td>
+                    <td>@result.Score</td>
+                    <td>@result.Word</td>
+                    <td>@result.Start</td>
+                    <td>@result.End</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
